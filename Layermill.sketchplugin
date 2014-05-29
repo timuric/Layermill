@@ -209,6 +209,6 @@ function main(){
 		layersVisible(true, layersTypes.hidden) //Set hidden layers visible back
 	}
 
-	saveFile(exportPath + "description.json", JSON.stringify(artboardDescription));
+	saveFile(exportPath + "description.json", JSON.stringify(artboardDescription, null, '\t'));
 }
 main();
