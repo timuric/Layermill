@@ -1,0 +1,213 @@
+var targetRgx = new RegExp("[^(]*");						//Match everything until ()
+var transitionRgx = new RegExp("[(](.)*[)]");				//Match everything within ()
+
+function saveFile(path, data){
+	var someContent = NSString.stringWithString_(data);
+	someContent.dataUsingEncoding_(NSUTF8StringEncoding).writeToFile_atomically_(path, true);
+}
+function findActionableLayers(layers){
+	var links = [];
+	var triggers = [];
+	for(var i = 0, l = layers.length; i<l; i++){
+		var layer = layers[i];
+
+		if([layer isVisible] == 1){
+			var layerName = [layer name];
+
+			if(layerName.charAt(0) == '@' && [layer class] != MSArtboardGroup){
+				var frame = layer.frameInArtboard();
+				var link = {
+					target: layerName.match(targetRgx)[0].replace('@','').replace(/ $/,""),
+					w: [frame width],
+					h: [frame height],
+					x: [frame x],
+					y: [frame y]
+				};
+
+				link.transition = layerName.match(transitionRgx) !== null ? layerName.match(transitionRgx)[0].replace(")","").replace("(","") : "none";
+
+				links.push(link);
+			}
+			else if(layerName.charAt(0) == '*' && [layer class] != MSArtboardGroup){
+				var frame = layer.frameInArtboard();
+
+				var trigger = {
+					w: [frame width],
+					h: [frame height],
+					x: [frame x],
+					y: [frame y]
+				};
+
+				trigger.transition = layerName.match(transitionRgx) !== null ? layerName.match(transitionRgx)[0].replace(")","").replace("(","") : "none";
+
+				if(layerName.charAt(1) == '#') {
+					trigger.target = layerName.match(targetRgx)[0].replace('*#','');
+				}
+				triggers.push(trigger);
+			}
+		}
+	}
+
+	return {
+		"links":links,
+		"triggers":triggers
+	};
+}
+function findSub(layers){
+	var layersToBeSliced = [];
+
+	function search(layers){
+		for(var j = 0, l = layers.length; j < l; j++){
+			var layer = layers[j];
+
+			if([layer isVisible] == 1){
+				layerName = layer.name();
+				if(layerName.charAt(0) == '#' && [layer class] == MSLayerGroup){
+					layersToBeSliced.push(layer);
+				}
+				else if([layer class] == MSLayerGroup){
+					search([layer layers]);
+				}
+			}
+
+		}
+	}
+	search(layers);
+
+	return layersToBeSliced;
+}
+function findVisibleLayers(allLayers){
+	var visibleLayers = [];
+	for(var i = 0, l = [allLayers count]; i<l; i++){
+		var layer = [allLayers objectAtIndex: i];
+		if( [layer isVisible] == 1 && layer.name().charAt(0) != '!') visibleLayers.push(layer);
+	}
+	return visibleLayers;
+}
+function layersByType(allLayers){
+	var visible = [];
+	var hidden = [];
+
+	for(var i = 0, l = [allLayers count]; i<l; i++){
+		var layer = [allLayers objectAtIndex: i];
+		if( [layer isVisible] == 1 && layer.name().charAt(0) != '!') visible.push(layer);
+		if(layer.name().charAt(0) == '!' && [layer isVisible] == 1) hidden.push(layer);
+	}
+	return {
+		"visible" : visible,
+		"hidden" : hidden
+	}
+}
+function convertToJSArray(nsArray){
+	var jsArray = [];
+	for(var i=0, l = [nsArray count]; i<l; i++){
+		jsArray.push([nsArray objectAtIndex: i]);
+	}
+	return jsArray;
+}
+function exportGroup(group,fileName){
+	var rect = [group rectByAccountingForStyleSize:[[group absoluteRect] rect]];
+	[doc saveArtboardOrSlice:[GKRect rectWithRect:rect] toFile:fileName];
+}
+function layersVisible(flag, layers){
+	layers.forEach(function(layer){
+		[layer setIsVisible: flag];
+	});
+}
+function allVisibleSubLayers(layers){
+	var subLayers = [];
+	function search(layers){
+		layers.forEach(function(layer){
+			if( [layer class] != MSLayerGroup ){
+				subLayers.push(layer);
+			}
+			else if([layer class] == MSLayerGroup){
+				subLayers.push(layer);
+				var subGroupLayers = convertToJSArray( [layer children] );
+				subGroupLayers.pop();  //Last element in array is it self, leaving it will cause infinite loop
+				search(subGroupLayers);
+			}
+		});
+	}
+	search(layers);
+
+	return subLayers;
+}
+function main(){
+	var projectName = [doc displayName].replace(".sketch","");
+	var exportPath = "/Users/timur/Library/Application Support/com.bohemiancoding.sketch3/LayerMillProjects/" + projectName +"/";
+	var artboards = [[doc currentPage] artboards];
+	var artboardDescription = [];
+
+	saveFile(exportPath + "description.json",'');	 //Save empty file
+
+	[doc saveArtboardOrSlice: artboards.objectAtIndex(0) toFile: exportPath + "thumbnail.png"]; //Export artboard image
+
+	for(var i = 0, l = [artboards count]; i < l; i++){
+		var artboard = artboards.objectAtIndex(i); 						//Pick artboard
+		var	artName = new String( artboard.name() ); 					//Converted artboard name to js string
+		var	fileCount = 0;
+
+		if(artName.charAt(0) === '!'){continue}
+
+		var layers = [artboard layers];
+		var	layersTypes = layersByType(layers);
+		var	subGroups = findSub(layersTypes.visible);					//Find subgroups (layers starting with #)
+		var	subGroupsDescription = [];
+
+		layersVisible(false, layersTypes.hidden);						//Hide hidden layers
+
+		//Describe subgroups (fodlers starting with #)
+		subGroups.forEach(function(group){
+			var groupName = new String([group name]).replace("#","");
+			var frame = [group frame];
+			var actionobleLayers = findActionableLayers( convertToJSArray([group children]) );
+
+			var description = {
+				"name": groupName,
+				w: [frame width],
+				h: [frame height],
+				x: [frame x],
+				y: [frame y],
+				links: actionobleLayers.links,
+				triggers: actionobleLayers.triggers
+			};
+
+			var imageName = i +"-"+ (fileCount++) + ".png";
+			exportGroup(group, exportPath + imageName);
+			description.image = imageName;
+
+			subGroupsDescription.push(description);
+		});
+
+		//Describe artboard view
+		layersVisible(false, subGroups); //Hide subgroups
+
+		var subLayers = allVisibleSubLayers( findVisibleLayers(layers) );  //Sub layers are collection of all nested layers that visible to the root view
+
+		var actionLayers = findActionableLayers( subLayers ); // Search only within visible
+
+		artboardDescription.push({
+			"id": artName.replace("@",""),
+			"w": artboard.frame().width(),
+			"h": artboard.frame().height(),
+			"groups": subGroupsDescription,
+			"image": i + ".png",
+			"links" : actionLayers.links,
+			"triggers": actionLayers.triggers
+		});
+
+		[doc saveArtboardOrSlice:artboard toFile: exportPath + i + ".png"]; //Export artboard image
+
+		layersVisible(true, subGroups); //Set subgroups visible back
+
+		if( artName.match("(Home)") === 1 ){
+			[doc saveArtboardOrSlice: artboard toFile: exportPath + "thumbnail.png"]; //Export artboard image
+		}
+
+		layersVisible(true, layersTypes.hidden) //Set hidden layers visible back
+	}
+
+	saveFile(exportPath + "description.json", JSON.stringify(artboardDescription));
+}
+main();
