@@ -135,7 +135,8 @@ function allVisibleSubLayers(layers){
 }
 function main(){
 	var projectName = [doc displayName].replace(".sketch","");
-	var exportPath = "/Users/timur/Library/Application Support/com.bohemiancoding.sketch3/LayerMillProjects/" + projectName +"/";
+	var homePath = "/Users/" + NSUserName()
+	var exportPath = homePath + "/Library/Application Support/com.bohemiancoding.sketch3/LayerMillProjects/" + projectName +"/";
 	var artboards = [[doc currentPage] artboards];
 	var artboardDescription = [];
 
